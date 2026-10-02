@@ -26,4 +26,5 @@ onnxruntime 必须用 1.19.2：1.30 在 PyInstaller 冻结环境 import 即段�
 
 在 DGStudio「模块」页的在线列表中获取本模块，安装时自动读取本仓库
 `requirements.txt` 并 pip 补装依赖，卸载 / 更新即热重载生效。
-也可手动把本仓库内容整个放入应用目录 `modules/<模块 id>/`。
+也可手动把本仓库 `modules/<模块 id>/` 文件夹整个放入应用目录的
+`modules/` 下。
