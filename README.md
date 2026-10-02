@@ -1,6 +1,6 @@
 # 画面识别联动（vision_link）
 
-依赖：`opencv-python-headless>=4.10`（必装，安装模块时自动补装）；OCR 数字/文字增强为可选依赖（自动尽力安装，失败不阻断）。
+依赖：`opencv-python-headless>=4.10`（必装）；OCR 数字/文字增强为可选依赖（失败不阻断）。全部依赖随本仓库 `modules/vision_link/wheels/` 分发（9 个 wheel，含锁定的 onnxruntime 1.19.2 与 numpy），打包版 DGStudio 安装时直接解包合并、离线无需 pip；`requirements.txt` 为依赖声明与源码运行入口。
 
 无需游戏 MOD，用 OpenCV 直接检测**屏幕画面**产生实时参数，适合任何能把状态画在 HUD 上的游戏。在「联动」页该模块卡片的**实时参数**区以「参数名 ← 检测行为」列表自定义（点「添加参数」新建，参数名即映射表达式中的 `{变量}`），检测行为四选一：
 
@@ -20,11 +20,11 @@ pip install --no-deps rapidocr-onnxruntime
 pip install "onnxruntime==1.19.2" pyclipper Shapely PyYAML six tqdm
 ```
 
-onnxruntime 必须用 1.19.2：1.30 在 PyInstaller 冻结环境 import 即段错误。未安装 OCR 时数字 / 文字检测自动回退内置字形 / 字体模板匹配。
+onnxruntime 必须用 1.19.2：1.30 在 PyInstaller 冻结环境 import 即段错误。未安装 OCR 时数字 / 文字检测自动回退内置字形 / 字体模板匹配。打包版 DGStudio 不经过 pip——`wheels/` 已携带上述全部 wheel，安装时按 dist-info 幂等合并进模块私有 `_deps/`。
 
 ## 安装
 
-在 DGStudio「模块」页的在线列表中获取本模块，安装时自动读取本仓库
-`requirements.txt` 并 pip 补装依赖，卸载 / 更新即热重载生效。
-也可手动把本仓库 `modules/<模块 id>/` 文件夹整个放入应用目录的
-`modules/` 下。
+在 DGStudio「模块」页的在线列表中获取本模块，安装时优先合并仓库自带的
+`wheels/`（离线、无网络依赖），缺项才经宿主内置 Python 子进程 pip 补装；
+卸载 / 更新即热重载生效。也可手动把本仓库 `modules/<模块 id>/` 文件夹整个
+放入应用目录的 `modules/` 下。
