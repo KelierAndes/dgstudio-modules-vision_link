@@ -551,7 +551,8 @@ class PluginTests(unittest.TestCase):
         self.addCleanup(roots.stop)
         manager = PluginManager(_Engine())
         self.assertTrue(manager.meta("vision_link")["realtime_manager"])
-        self.assertFalse(manager.meta("strength_logger")["realtime_manager"])
+        # 模块拆分为一仓一模组后，其他模块不在本仓库内
+        self.assertIsNone(manager.meta("strength_logger"))
 
     def test_link_params_from_settings(self):
         ctx = FakeCtx()
