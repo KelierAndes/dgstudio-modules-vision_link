@@ -159,11 +159,11 @@ class _DeviceApi:
     def zap(self, channel, seconds=1.0, slot_id=None):
         return self._ctx.zap(channel, seconds, slot_id=slot_id)
 
-    def fire_start(self, slot_id=None):
-        return self._ctx.fire_start(slot_id=slot_id)
+    def fire_start(self, slot_id=None, channel=None):
+        return self._ctx.fire_start(slot_id=slot_id, channel=channel)
 
-    def fire_stop(self, slot_id=None):
-        return self._ctx.fire_stop(slot_id=slot_id)
+    def fire_stop(self, slot_id=None, channel=None):
+        return self._ctx.fire_stop(slot_id=slot_id, channel=channel)
 
     def emergency_stop(self):
         return self._ctx.emergency_stop()

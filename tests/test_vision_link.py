@@ -60,11 +60,11 @@ class FakeCtx:
     async def set_wave(self, channel, name, slot_id=None):
         self.calls.append(("wave", channel, name))
 
-    async def fire_start(self, slot_id=None):
-        self.calls.append(("fire", "start"))
+    async def fire_start(self, slot_id=None, channel=None):
+        self.calls.append(("fire", "start", channel))
 
-    async def fire_stop(self, slot_id=None):
-        self.calls.append(("fire", "stop"))
+    async def fire_stop(self, slot_id=None, channel=None):
+        self.calls.append(("fire", "stop", channel))
 
     async def emergency_stop(self):
         self.calls.append(("emergency",))
