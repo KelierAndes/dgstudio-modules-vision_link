@@ -1,22 +1,3 @@
-"""画面识别运行时：采集循环 + 检测器调度 + 共享映射引擎。
-
-VisionBridge 挂在模块实例的 ``bridge`` 属性上（联动页按 ``inst.bridge.engine``
-查找映射引擎以渲染实时值）。检测器为「参数名 ← 检测行为」列表，存于模块
-设置 ``detectors`` 键（list[dict]），由联动页实时数据区逐参数管理：
-
-* 检测颜色 ``color``：``rect``/``color``(#RRGGBB)/``tol``/``ratio`` → bool；
-* 检测图片 ``image``：``rect``/``file``(例图)/``thresh`` → bool；
-* 检测数值 ``number``：``rect``/``fmt``(int|float|text)/``text``/``thresh``
-  → int | float | bool（RapidOCR 识别，不可用回退字形模板）；
-* 检测数值条 ``bar``：``rect``/``min``/``max``/``anchor``(锚点例图)/``thresh``
-  → float 0~1；min/max 为截图图像坐标下 0%/100% 的轴位置（横条 x、
-  纵条 y；整条截图选取时自动取区域两端）。
-
-坐标一律为**截图图像像素**（截图选取、手动输入、采集裁剪同管线同口径）。
-颜色/图片/文字检测总有连续值（bool 0/1）；数值与数值条读不出时按「失败
-保持」（``hold``，默认 1s）沿用上次值，超时输出 0。例图与锚点存放在
-``config/vision_link/templates/``，改 Detector 配置经 reload_config 热生效。
-"""
 
 from __future__ import annotations
 
@@ -62,7 +43,6 @@ def _int_field(value, default):
 
 
 def normalize_detector(raw) -> tuple[dict | None, str]:
-    """检测器条目归一化校验 → (规格, 错误信息)；规格 None 时错误信息非空。"""
     if not isinstance(raw, dict):
         return None, "配置项需为对象"
     try:
@@ -119,7 +99,6 @@ def normalize_detector(raw) -> tuple[dict | None, str]:
 
 
 class Detector:
-    """单个检测器：参数名、行为类别、归一化规格与运行态。"""
 
     def __init__(self, name: str, kind: str, spec: dict | None):
         self.name = name
@@ -131,7 +110,6 @@ class Detector:
 
 
 class _DeviceApi:
-    """把 ModuleContext 适配成核心参数派发器需要的接口。"""
 
     def __init__(self, bridge: "VisionBridge"):
         self._bridge = bridge
@@ -198,7 +176,6 @@ class VisionBridge:
         self._last_err = 0.0
         self._last_dump = 0.0
 
-    # ------------------------------------------------------------ 路径
 
     @property
     def data_dir(self) -> str:
@@ -214,10 +191,8 @@ class VisionBridge:
     def debug_dir(self) -> str:
         return os.path.join(self.data_dir, "debug")
 
-    # ------------------------------------------------------------ 配置
 
     def apply_config(self) -> None:
-        """装载映射表（首轮静默不写设备）并重建检测器表。"""
         first = not self._primed
         if first:
             self.engine.armed = False
@@ -229,7 +204,6 @@ class VisionBridge:
         self.rebuild()
 
     def rebuild(self) -> None:
-        """归一化 detectors 列表 → 检测器表；无效条目记录 error 不中断。"""
         dets: list[Detector] = []
         seen: dict[str, str] = {}
         for raw in (self.config.get("detectors") or []):
@@ -286,7 +260,6 @@ class VisionBridge:
                 except Exception as exc:
                     det.error = f"数字模板不可用: {exc!r}"
 
-    # ------------------------------------------------------------ 生命周期
 
     async def start(self) -> None:
         if self._running:
@@ -324,7 +297,6 @@ class VisionBridge:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    # ------------------------------------------------------------ 采集与检测
 
     async def _loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -381,7 +353,6 @@ class VisionBridge:
         return (False, 0.0)
 
     def _ensure_ocr(self) -> None:
-        """首次用到文字识别时初始化 RapidOCR（executor 线程内调用）。"""
         if not self._ocr_checked:
             self._ocr_checked = True
             self._ocr = detect.get_ocr()
@@ -427,7 +398,6 @@ class VisionBridge:
         for name, (_ok, value) in results.items():
             self.engine.signal(name, round(float(value), 3))
 
-    # ------------------------------------------------------------ 辅助
 
     def _dump_debug(self, frame) -> None:
         now = time.monotonic()

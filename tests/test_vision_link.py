@@ -1,4 +1,3 @@
-"""vision_link 模块测试：规格归一化、四类检测行为、旧配置迁移、运行时与插件装载。"""
 from __future__ import annotations
 
 import os
@@ -220,7 +219,6 @@ class NumberDetectTests(unittest.TestCase):
     @unittest.skipIf(detect.get_ocr() is None,
                      "rapidocr-onnxruntime 未安装")
     def test_dark_hud_wide_region(self):
-        """深底浅字 + 大留白（计算器案例：实值 96 误读 996）→ 预处理后正确。"""
         frame = np.full((101, 538, 3), 32, np.uint8)
         tpl = detect.render_text("96", 44)
         th, tw = tpl.shape
@@ -306,7 +304,6 @@ class TextDetectTests(unittest.TestCase):
 
 class BarDetectTests(unittest.TestCase):
     def _frame_and_anchor(self, ox=0, oy=0):
-        """整条：区域 (ox,oy,200,40)，0..100 填充（交界在 ox+100）。"""
         frame = np.zeros((40 + oy + 10, 200 + ox + 10, 3), np.uint8)
         frame[oy:oy + 40, ox:ox + 200] = (0, 0, 0)
         frame[oy:oy + 40, ox:ox + 100] = (0, 0, 255)
@@ -551,7 +548,6 @@ class PluginTests(unittest.TestCase):
         self.addCleanup(roots.stop)
         manager = PluginManager(_Engine())
         self.assertTrue(manager.meta("vision_link")["realtime_manager"])
-        # 模块拆分为一仓一模组后，其他模块不在本仓库内
         self.assertIsNone(manager.meta("strength_logger"))
 
     def test_link_params_from_settings(self):

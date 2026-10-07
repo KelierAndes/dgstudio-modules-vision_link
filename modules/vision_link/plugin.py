@@ -1,20 +1,3 @@
-"""画面识别联动模块：OpenCV 画面检测 → 核心参数映射驱动设备。
-
-实时参数在联动页实时数据区以「参数名 ← 检测行为」列表自定义（
-``META["realtime_manager"]``），检测行为四类：
-
-* 检测颜色：``rect`` + ``color``(#RRGGBB) + ``tol``/``ratio`` → bool；
-* 检测图片：``rect`` + ``file`` 例图 + ``thresh`` → bool；
-* 检测数值：``rect`` + ``fmt``(int/float/text) + ``text`` + ``thresh``
-  → int / float / bool；
-* 检测数值条：``rect`` + ``min``/``max``（相对区域左/上缘）+ ``anchor``
-  锚点例图（填充色与背景色交界窄条）+ ``thresh`` → float 0~1。
-
-区域与例图支持截图选取（区域/例图与采集同用 ImageGrab 虚拟屏幕坐标）
-或手动输入；检测行为配置随各实时数据条目管理，模块设置区仅保留采集
-间隔/失败保持/标定调试等模块级设置。参数名即映射表达式变量（{名称}），
-例图与锚点存于 config/vision_link/templates/。
-"""
 
 META = {
     "id": "vision_link",
@@ -79,13 +62,11 @@ class VisionLinkModule(ModuleBase):
         return META["config"]
 
     def template_dir(self) -> str:
-        """例图/锚点存放目录（config/vision_link/templates/），供页面保存截图裁剪。"""
         base = os.path.dirname(os.path.abspath(str(
             getattr(self.ctx.settings, "path", "")))) if self.ctx else ""
         return os.path.join(base, "vision_link", "templates")
 
     def link_params(self) -> list[tuple[str, str]]:
-        """检测器名 → 映射表达式变量池（{名称}）。"""
         out: list[tuple[str, str]] = []
         seen: set[str] = set()
         if self.bridge is not None:
@@ -166,10 +147,6 @@ def _legacy_rect(text: str, ox: int, oy: int):
 
 
 def migrate_legacy(settings, log=None) -> bool:
-    """旧版全局 DSL（templates/bars/digits/region）一次性迁到 detectors 列表。
-
-    旧数值条为 HSV 占比口径，与新版锚点例图不兼容，跳过并提示重配；
-    旧 region 作为坐标偏移并入各检测区域。"""
     if not any(key in settings for key in
                ("templates", "bars", "digits", "region")):
         return False

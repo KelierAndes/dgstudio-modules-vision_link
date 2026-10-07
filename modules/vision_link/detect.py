@@ -1,26 +1,3 @@
-"""画面识别检测（纯函数层）：检测颜色 / 检测图片 / 检测数值 / 检测数值条。
-
-全部函数作用于 BGR ndarray（采集帧或其裁剪），不依赖引擎与 UI：
-
-* 检测颜色 ``color_present``：区域内与目标 RGB 距离 ≤ 容差的像素占比
-  达到阈值 → True（输出 bool）；
-* 检测图片 ``match_template``：cv2.matchTemplate 归一化相关系数，
-  调用方与阈值比较得 bool；
-* 检测数值 ``read_number``：RapidOCR（开源 OCR，onnxruntime 离线推理）读
-  区域文本 → fmt=int 输出整数、fmt=float 输出浮点；OCR 不可用时回退到
-  0-9 字形模板匹配（Otsu 二值 + 外部轮廓）；
-* 文字模式 ``text_present``：OCR 结果包含期望文本（去空格、忽略大小写）
-  → bool；OCR 不可用回退到系统字体渲染模板比对；
-* 检测数值条 ``bar_anchor_ratio``：锚点例图（取填充色与背景色交界的
-  竖直窄条）沿条轴向模板匹配定位当前交界位置，按
-  ``(位置-最小)/(最大-最小)`` 输出 0~1；**最小/最大为截图图像坐标下的
-  位置**（横向条为 x、纵向条为 y，可由整条截图自动填充：0%=区域左/上缘，
-  100%=区域右/下缘）；轴向按区域形状推断（宽≥高为横向条）。
-
-所有坐标均为**截图图像像素**（与 ``grab_frame`` 的 ImageGrab 管线同一
-坐标系），区域与例图由联动页截图选取（天然同口径）或以标定调试帧为准
-手动输入。
-"""
 
 from __future__ import annotations
 
@@ -31,8 +8,6 @@ import cv2
 import numpy as np
 from PIL import ImageGrab
 
-# parse_name / parse_rect 由核心 dglab.parsing 提供（联动页编辑器共用同一套），
-# 此处导入后经 __all__ 再导出，模块内引用路径不变。
 from dglab.parsing import IDENT, parse_name, parse_rect
 
 __all__ = ["parse_name", "parse_rect", "parse_color", "grab_frame", "crop",
@@ -49,7 +24,6 @@ _OCR_TRIED = False
 
 
 def get_ocr():
-    """RapidOCR 单例（rapidocr-onnxruntime）；不可用返回 None 并回退模板法。"""
     global _OCR, _OCR_TRIED
     if not _OCR_TRIED:
         _OCR_TRIED = True
@@ -62,7 +36,6 @@ def get_ocr():
 
 
 def parse_color(color) -> tuple[int, int, int]:
-    """``"RRGGBB"``（可带 #）或 ``"R,G,B"`` → (r, g, b)。"""
     text = str(color or "").strip()
     if text.startswith("#"):
         text = text[1:]
@@ -79,15 +52,11 @@ def parse_color(color) -> tuple[int, int, int]:
 
 
 def grab_frame(region=None):
-    """截屏（ImageGrab 管线）→ BGR ndarray；region 为虚拟屏幕坐标 bbox。"""
     img = ImageGrab.grab(all_screens=True, bbox=region)
     return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
 
 
 def crop(frame, rect):
-    """按 (x, y, w, h) 裁剪并钳制到帧边界；空区域返回 None。
-
-    rect 为 None 时返回整帧（坐标已是采集帧绝对坐标）。"""
     if frame is None:
         return None
     fh, fw = frame.shape[:2]
@@ -103,7 +72,6 @@ def crop(frame, rect):
 
 def color_present(frame, rect, rgb, tol: float = 40.0,
                   min_ratio: float = 0.05):
-    """区域内目标颜色（RGB，逐通道差 ≤ tol）像素占比 ≥ min_ratio。"""
     region = crop(frame, rect)
     if region is None:
         return None
@@ -117,7 +85,6 @@ def color_present(frame, rect, rgb, tol: float = 40.0,
 
 
 def match_template(frame, template, rect=None):
-    """最佳匹配位置得分 0-1（TM_CCOEFF_NORMED，负值截为 0）。"""
     search = crop(frame, rect)
     if search is None or template is None:
         return None
@@ -138,14 +105,6 @@ def _binarize(region):
 
 
 def ocr_lines(frame, rect, ocr=None):
-    """OCR 读区域文本 → [(text, score)]（按位置排序、重叠框去重）；区域
-    无效或引擎不可用返回 None。
-
-    先对区域做 OpenCV 预处理（深底反色 → CLAHE 对比增强 → Otsu 二值 →
-    文字内容裁剪 → 放大到 ~48px → 白边）再送 OCR——RapidOCR 对深底浅字
-    与大留白区域效果差，预处理后显著更准；预处理无结果时回退原图。
-    ``ocr=False`` 强制跳过 OCR（调用方要回退模板路径时用）；``None`` 取
-    全局单例。"""
     if ocr is False:
         return None
     region = crop(frame, rect)
@@ -167,19 +126,18 @@ def ocr_lines(frame, rect, ocr=None):
 
 
 def _prep_ocr_image(region):
-    """OCR 预处理：输出白底黑字 BGR 图；区域无有效文字内容返回 None。"""
     if region is None or region.size == 0:
         return None
     gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
     if float(np.mean(gray)) < 110.0:
-        gray = cv2.bitwise_not(gray)          # 深底浅字 → 浅底深字
+        gray = cv2.bitwise_not(gray)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     gray = clahe.apply(gray)
     _, bw = cv2.threshold(gray, 0, 255,
                           cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     border = np.concatenate([bw[0, :], bw[-1, :], bw[:, 0], bw[:, -1]])
     if float(np.mean(border)) < 127.0:
-        bw = cv2.bitwise_not(bw)              # 统一为白底黑字
+        bw = cv2.bitwise_not(bw)
     ys, xs = np.nonzero(bw == 0)
     if xs.size < 8 or ys.size < 8:
         return None
@@ -198,7 +156,6 @@ def _prep_ocr_image(region):
 
 
 def _collect_ocr(result):
-    """RapidOCR 原始结果 → [(text, score, (x, y, x2, y2))]。"""
     rows = []
     for item in result or []:
         try:
@@ -213,7 +170,6 @@ def _collect_ocr(result):
 
 
 def _box_dup(a, b) -> bool:
-    """两检测框视为重复：IoU ≥ 0.5 或交叠占小框面积 ≥ 0.6。"""
     ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
     iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
     inter = ix * iy
@@ -227,8 +183,6 @@ def _box_dup(a, b) -> bool:
 
 
 def _dedup_lines(rows):
-    """重叠检测框去重（保留文本更长/得分更高者）→ 按 (y, x) 排序输出
-    [(text, score)]。"""
     kept = []
     for text, score, box in sorted(rows, key=lambda r: (-len(r[0]), -r[1])):
         if any(_box_dup(box, other) for _t, _s, other in kept):
@@ -240,8 +194,6 @@ def _dedup_lines(rows):
 
 def read_number(frame, rect, fmt: str, thresh: float = 0.6, ocr=None,
                 glyphs: dict | None = None, dot=None):
-    """读区域数字。OCR 主路径：文本 → 按格式解析；不可用回退字形模板。
-    fmt=int → int；fmt=float → float；无有效读数返回 None。"""
     lines = ocr_lines(frame, rect, ocr)
     if lines is not None:
         joined = "".join(text for text, score in lines
@@ -253,8 +205,6 @@ def read_number(frame, rect, fmt: str, thresh: float = 0.6, ocr=None,
 
 
 def _parse_number(text: str, fmt: str):
-    """OCR 文本 → 数值：int 取首个数字串（容忍千分位逗号）；float 优先含
-    小数点的记号；无数字返回 None。"""
     clean = str(text or "").replace(" ", "")
     if not clean:
         return None
@@ -281,8 +231,6 @@ def _parse_number(text: str, fmt: str):
 
 def _read_number_glyphs(frame, rect, glyphs: dict, dot, fmt: str,
                         thresh: float = 0.6):
-    """字形模板回退：Otsu 二值 → 外部轮廓按 x 排序 → 归一化比对 0-9；
-    fmt=float 额外识别底部小字形为小数点。"""
     region = crop(frame, rect)
     if region is None or not glyphs:
         return None
@@ -343,7 +291,6 @@ def _load_font(height_px: int):
 
 
 def render_text(text: str, height_px: int):
-    """系统字体渲染文本 → 紧致裁剪的灰度图（白字黑底）；不可用返回 None。"""
     from PIL import Image, ImageDraw
     font = _load_font(height_px)
     if font is None or not str(text):
@@ -361,8 +308,6 @@ def render_text(text: str, height_px: int):
 
 def text_present(frame, rect, text: str, thresh: float = 0.65, ocr=None,
                  cache: dict | None = None):
-    """区域是否出现期望文本。OCR 主路径：识别结果（去空格、忽略大小写）
-    包含期望文本即真；OCR 不可用回退系统字体渲染模板比对。"""
     expected = str(text or "").strip()
     if not expected:
         return None
@@ -375,8 +320,6 @@ def text_present(frame, rect, text: str, thresh: float = 0.65, ocr=None,
 
 def _text_present_template(frame, rect, text: str, thresh: float = 0.65,
                            cache: dict | None = None):
-    """字体渲染回退：基准渲染（字号 48）后按区域高度 0.3~1.0 缩放阶梯
-    比对，正反相取优——应对游戏内文字像素高未知的情况。"""
     region = crop(frame, rect)
     if region is None:
         return None
@@ -408,11 +351,6 @@ def _text_present_template(frame, rect, text: str, thresh: float = 0.65,
 
 def bar_anchor_ratio(frame, rect, min_pos: float, max_pos: float,
                      anchor, thresh: float = 0.7):
-    """锚点例图沿条轴向定位填充/背景交界 → (位置-最小)/(最大-最小) 钳制 0~1。
-
-    锚点应取横跨条高的「填充色|背景色」交界窄条；**最小/最大为截图图像
-    坐标下的位置**（横向条为 x、纵向条为 y，整条截图选取时 0%=区域左/上缘、
-    100%=区域右/下缘）；轴向按区域形状推断（宽≥高为横向条）。"""
     region = crop(frame, rect)
     if region is None or anchor is None:
         return None
@@ -434,7 +372,6 @@ def bar_anchor_ratio(frame, rect, min_pos: float, max_pos: float,
 
 
 def _gen_digit(digit: int) -> np.ndarray:
-    """内置字体渲染单字 → 紧致裁剪 → 归一到 GLYPH 尺寸（与画面字形同口径）。"""
     canvas = np.zeros((GLYPH_H * 2, GLYPH_W * 2), np.uint8)
     cv2.putText(canvas, str(digit), (10, GLYPH_H + 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 2.0, 255, 5, cv2.LINE_AA)
@@ -449,7 +386,6 @@ def _gen_digit(digit: int) -> np.ndarray:
 
 
 def ensure_digit_templates(directory: str) -> dict:
-    """加载 templates/digits/0-9.png，缺失的自动生成；统一归一到 GLYPH 尺寸。"""
     os.makedirs(directory, exist_ok=True)
     out = {}
     for digit in range(10):
@@ -465,7 +401,6 @@ def ensure_digit_templates(directory: str) -> dict:
 
 
 def ensure_dot_template(directory: str) -> np.ndarray:
-    """小数点模板（templates/digits/dot.png，缺失自动生成）。"""
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, "dot.png")
     img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)

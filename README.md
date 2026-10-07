@@ -1,26 +1,15 @@
-# 画面识别联动（vision_link）
+# 画面识别联动（DGStudio 模块）
 
-依赖：`opencv-python-headless>=4.10`（必装）；OCR 数字/文字增强为可选依赖（失败不阻断）。全部依赖随本仓库 `modules/vision_link/wheels/` 分发（9 个 wheel，含锁定的 onnxruntime 1.19.2 与 numpy），打包版 DGStudio 安装时直接解包合并、离线无需 pip；`requirements.txt` 为依赖声明与源码运行入口。
+无需游戏 MOD，用 OpenCV 直接检测**屏幕画面**产生实时参数，适合任何能把状态画在 HUD 上的游戏。
 
-无需游戏 MOD，用 OpenCV 直接检测**屏幕画面**产生实时参数，适合任何能把状态画在 HUD 上的游戏。在「联动」页该模块卡片的**实时参数**区以「参数名 ← 检测行为」列表自定义（点「添加参数」新建，参数名即映射表达式中的 `{变量}`），检测行为四选一：
+## 功能
+
+在「联动」页该模块卡片的**实时参数**区以「参数名 ← 检测行为」列表自定义（点「添加参数」新建，参数名即映射表达式中的 `{变量}`），检测行为四选一：
 
 * **检测颜色**（输出 真/假）：区域 + 颜色（#RRGGBB）+ 容差 + 占比——区域内该颜色的像素占比达标即真；
 * **检测图片**（输出 真/假）：区域 + 例图 + 匹配阈值——例图在区域内出现即真（图标 / 警示识别）；
 * **检测数值**（输出 整数 / 小数 / 真/假）：区域 + 输出类型；整数 / 小数由 **RapidOCR**（开源离线 OCR）读出画面数字；「文字」模式输入期望文本，按是否出现输出真/假；
 * **检测数值条**（输出 0~1）：区域 + **0% / 100% 位置（截图图像坐标）** + **锚点例图**——锚点取「填充色与背景色交界」的竖直窄条，按锚点沿条轴的位置换算填充比例，适合血条 / 蓝条 / 耐力条。**用「截区域」框选整条滑条时 0%/100% 位置自动取区域两端**，也可手动输入（横向条为 x 坐标、纵向条为 y 坐标，轴向按区域形状自动判断）。
-
-区域与例图都支持两种途径：点「截区域 / 截例图」在当前画面上**截图框选**（与采集同一管线，坐标天然一致；例图自动存入 `config/vision_link/templates/`），或手动输入坐标/文件名（坐标即截图图像像素，可用「标定调试」输出的帧核对）。检测配置随各参数条目即时生效，无需重启模块；数值 / 数值条读不出时按「失败保持」沿用上次值，超时归零。
-
-## OCR 可选依赖
-
-数字 / 文字识别依赖 RapidOCR（`rapidocr-onnxruntime`）。其 pip 元数据声明的 `opencv-python` 会与 `opencv-python-headless` 冲突，因此模块以**可选依赖（`!` 前缀 + `--no-deps`）**声明、连同其余依赖单独安装：
-
-```
-pip install --no-deps rapidocr-onnxruntime
-pip install "onnxruntime==1.19.2" pyclipper Shapely PyYAML six tqdm
-```
-
-onnxruntime 必须用 1.19.2：1.30 在 PyInstaller 冻结环境 import 即段错误。未安装 OCR 时数字 / 文字检测自动回退内置字形 / 字体模板匹配。打包版 DGStudio 不经过 pip——`wheels/` 已携带上述全部 wheel，安装时按 dist-info 幂等合并进模块私有 `_deps/`。
 
 ## 安装
 
@@ -28,3 +17,24 @@ onnxruntime 必须用 1.19.2：1.30 在 PyInstaller 冻结环境 import 即段�
 `wheels/`（离线、无网络依赖），缺项才经宿主内置 Python 子进程 pip 补装；
 卸载 / 更新即热重载生效。也可手动把本仓库 `modules/<模块 id>/` 文件夹整个
 放入应用目录的 `modules/` 下。
+
+依赖：`opencv-python-headless>=4.10`（必装）；OCR 数字/文字增强为可选依赖（失败不阻断）。全部依赖随本仓库 `modules/vision_link/wheels/` 分发（9 个 wheel，含锁定的 onnxruntime 1.19.2 与 numpy），打包版 DGStudio 安装时直接解包合并、离线无需 pip。
+
+相关仓库：DGStudio 核心 [DG-Lab-Studio](https://github.com/KelierAndes/DG-Lab-Studio)；模块市场 [dgstudio-modules-market](https://github.com/KelierAndes/dgstudio-modules-market)。
+
+## 配置与使用
+
+区域与例图都支持两种途径：点「截区域 / 截例图」在当前画面上**截图框选**（与采集同一管线，坐标天然一致；例图自动存入 `config/vision_link/templates/`），或手动输入坐标/文件名（坐标即截图图像像素，可用「标定调试」输出的帧核对）。检测配置随各参数条目即时生效，无需重启模块；数值 / 数值条读不出时按「失败保持」沿用上次值，超时归零。
+
+数字 / 文字识别依赖 RapidOCR（`rapidocr-onnxruntime`）；未安装 OCR 时数字 / 文字检测自动回退内置字形 / 字体模板匹配。手动补装时连同其余依赖单独安装：
+
+```
+pip install --no-deps rapidocr-onnxruntime
+pip install "onnxruntime==1.19.2" pyclipper Shapely PyYAML six tqdm
+```
+
+onnxruntime 必须用 1.19.2。
+
+## 许可
+
+本项目按仓库根目录的 [LICENSE](LICENSE)（GPL-3.0）分发。
