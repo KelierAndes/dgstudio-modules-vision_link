@@ -2,7 +2,7 @@
 META = {
     "id": "vision_link",
     "name": "画面识别联动",
-    "version": "0.3.4",
+    "version": "0.3.5",
     "description": "OpenCV 通用画面识别：以「参数名 ← 检测行为」自定义实时参数"
                    "（检测颜色 / 图片 / 数值 / 数值条，区域例图可截图选取，"
                    "数字/文字 RapidOCR 识别，OCR 跑在应用自带 Python 的子进程里），"
@@ -47,6 +47,17 @@ from modules.vision_link.bridge import KIND_LABELS, VisionBridge
 
 _CONFIG_DEFAULTS = spec_defaults(META["config"])
 
+_VALUE_TYPES = {"color": "Bool", "image": "Bool", "bar": "Float"}
+
+
+def detector_value_type(kind: str, fmt: str = "") -> str:
+    """检测行为决定的输出类型：颜色 / 图片 / 文字判定为布尔，数值条为浮点。"""
+    if kind == "number":
+        if fmt == "float":
+            return "Float"
+        return "Bool" if fmt == "text" else "Int"
+    return _VALUE_TYPES.get(kind, "Float")
+
 
 class VisionLinkModule(ModuleBase):
     id = META["id"]
@@ -67,18 +78,21 @@ class VisionLinkModule(ModuleBase):
             getattr(self.ctx.settings, "path", "")))) if self.ctx else ""
         return os.path.join(base, "vision_link", "templates")
 
-    def link_params(self) -> list[tuple[str, str]]:
-        out: list[tuple[str, str]] = []
+    def detector_entries(self) -> list[tuple[str, str, str]]:
+        """本模块维护的检测参数：(名称, 行为, 数值格式)。"""
+        out: list[tuple[str, str, str]] = []
         seen: set[str] = set()
         if self.bridge is not None:
             for det in self.bridge.detectors:
-                if not det.error and det.name not in seen:
-                    seen.add(det.name)
-                    out.append((det.name,
-                                KIND_LABELS.get(det.kind, det.kind)))
+                if det.error or det.name in seen:
+                    continue
+                seen.add(det.name)
+                out.append((det.name, det.kind,
+                            str((det.spec or {}).get("fmt") or "")))
             return out
-        for raw in (self.ctx.settings.get("detectors") or []
-                    if self.ctx is not None else []):
+        rows = (self.ctx.settings.get("detectors") or []
+                if self.ctx is not None else [])
+        for raw in rows:
             if not isinstance(raw, dict):
                 continue
             if not str(raw.get("name") or "").strip():
@@ -87,17 +101,23 @@ class VisionLinkModule(ModuleBase):
                 name = detect.parse_name(raw.get("name"))
             except ValueError:
                 continue
-            if name not in seen:
-                seen.add(name)
-                out.append((name, KIND_LABELS.get(str(raw.get("kind") or ""),
-                                                  str(raw.get("kind") or ""))))
+            kind = str(raw.get("kind") or "")
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append((name, kind, str(raw.get("fmt") or "")))
         return out
 
+    def link_params(self) -> list[tuple[str, str]]:
+        return [(name, KIND_LABELS.get(kind, kind))
+                for name, kind, _fmt in self.detector_entries()]
+
     def temp_specs(self) -> list[dict]:
-        """检测参数由本模块维护：向核心变量表登记为「可读」，回传方向没有意义。"""
-        return [{"key": name, "label": label, "dir": "in",
+        """检测参数由本模块维护：向变量表登记为「可读」并带上输出类型。"""
+        return [{"key": name, "label": KIND_LABELS.get(kind, kind),
+                 "dir": "in", "type": detector_value_type(kind, fmt),
                  "desc": "画面识别检测值 · 模块每拍维护"}
-                for name, label in self.link_params()]
+                for name, kind, fmt in self.detector_entries()]
 
     def on_load(self, ctx) -> None:
         self.ctx = ctx
