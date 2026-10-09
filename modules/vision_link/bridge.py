@@ -11,7 +11,7 @@ from dglab.mapping import MappingEngine, signal_specs
 from dglab.params import (build_dispatchers, core_alias_values, core_inputs,
                           device_state_values)
 
-from modules.vision_link import detect
+from modules.vision_link import detect, ocr_env
 
 DEFAULTS = {
     "interval": 0.5,
@@ -168,7 +168,7 @@ class VisionBridge:
         self._dot = None
         self._text_cache: dict = {}
         self._ocr = None
-        self._ocr_checked = False
+        self._ocr_preparing = False
         self._running = False
         self._task: asyncio.Task | None = None
         self._tasks: set[asyncio.Task] = set()
@@ -283,6 +283,7 @@ class VisionBridge:
         if self._task is not None:
             self._task.cancel()
             self._task = None
+        ocr_env.stop()
         self.engine.reset()
 
     def is_running(self) -> bool:
@@ -353,12 +354,17 @@ class VisionBridge:
         return (False, 0.0)
 
     def _ensure_ocr(self) -> None:
-        if not self._ocr_checked:
-            self._ocr_checked = True
-            self._ocr = detect.get_ocr()
-            if self._ocr is None:
-                self._err("RapidOCR 不可用，数字/文字检测回退模板匹配"
-                          "（pip install rapidocr-onnxruntime 启用 OCR）")
+        if self._ocr is not None or self._ocr_preparing:
+            return
+        self._ocr = detect.get_ocr() or ocr_env.client()
+        if self._ocr is not None:
+            return
+        self._ocr_preparing = True
+        if not ocr_env.runner_python():
+            self._err("RapidOCR 不可用，数字/文字检测回退模板匹配"
+                      "（pip install rapidocr-onnxruntime 启用 OCR）")
+            return
+        ocr_env.prepare_async(self._err)
 
     def _measure(self, det: Detector, frame):
         spec = det.spec

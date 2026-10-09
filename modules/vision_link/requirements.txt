@@ -1,12 +1,7 @@
 opencv-python-headless>=4.10
 
-# 可选 OCR 增强：以「!」前缀声明 = 可选依赖，安装时以 --no-deps
-# 方式安装、失败不阻断模块安装；手动 pip install -r 时请跳过这些行。
-# onnxruntime 必须用 1.19.2：1.30 在 PyInstaller 冻结环境 import 即段错误。
-!rapidocr-onnxruntime>=1.4.4
-!onnxruntime==1.19.2
-!pyclipper
-!Shapely
-!PyYAML
-!six
-!tqdm
+# 数字/文字识别（RapidOCR）不属于本进程的依赖：onnxruntime 在 PyInstaller
+# 冻结进程里 import 即段错误，且旧版本没有适配应用内置 Python 的 wheel。
+# 打包版在首次用到 OCR 时，由应用自带的 _python 解释器自行安装
+# rapidocr-onnxruntime 并在识别子进程里运行（见 ocr_env.py / ocr_worker.py）。
+# 开发环境想要进程内 OCR：手动 pip install rapidocr-onnxruntime 即可。

@@ -18,7 +18,7 @@
 卸载 / 更新即热重载生效。也可手动把本仓库 `modules/<模块 id>/` 文件夹整个
 放入应用目录的 `modules/` 下。
 
-依赖：`opencv-python-headless>=4.10`（必装）；OCR 数字/文字增强为可选依赖（失败不阻断）。全部依赖随本仓库 `modules/vision_link/wheels/` 分发（9 个 wheel，含锁定的 onnxruntime 1.19.2 与 numpy），打包版 DGStudio 安装时直接解包合并、离线无需 pip。
+依赖：`opencv-python-headless>=4.10`（必装，随本仓库 `modules/vision_link/wheels/` 离线分发）。数字 / 文字识别用的 RapidOCR **不装进模块进程**：`onnxruntime` 在打包版（PyInstaller 冻结）进程里 import 即段错误，因此首次用到 OCR 时，应用会用它自带的 `_python` 解释器自行安装 `rapidocr-onnxruntime`（优先用 `wheels/` 里的随包 wheel，不适配则联网安装），识别在子进程里完成，本模块只收发图片与结果。
 
 相关仓库：DGStudio 核心 [DG-Lab-Studio](https://github.com/KelierAndes/DG-Lab-Studio)；模块市场 [dgstudio-modules-market](https://github.com/KelierAndes/dgstudio-modules-market)。
 
@@ -26,14 +26,7 @@
 
 区域与例图都支持两种途径：点「截区域 / 截例图」在当前画面上**截图框选**（与采集同一管线，坐标天然一致；例图自动存入 `config/vision_link/templates/`），或手动输入坐标/文件名（坐标即截图图像像素，可用「标定调试」输出的帧核对）。检测配置随各参数条目即时生效，无需重启模块；数值 / 数值条读不出时按「失败保持」沿用上次值，超时归零。
 
-数字 / 文字识别依赖 RapidOCR（`rapidocr-onnxruntime`）；未安装 OCR 时数字 / 文字检测自动回退内置字形 / 字体模板匹配。手动补装时连同其余依赖单独安装：
-
-```
-pip install --no-deps rapidocr-onnxruntime
-pip install "onnxruntime==1.19.2" pyclipper Shapely PyYAML six tqdm
-```
-
-onnxruntime 必须用 1.19.2。
+数字 / 文字识别依赖 RapidOCR（`rapidocr-onnxruntime`），由应用内置 Python 在首次用到时自动准备，无需手动安装；OCR 环境不可用（例如离线且随包 wheel 不适配）时，数字 / 文字检测自动回退内置字形 / 字体模板匹配，其余检测类型不受影响。开发环境（源码运行 DGStudio）若想用进程内 OCR，直接 `pip install rapidocr-onnxruntime` 即可；想让源码运行也走子进程链路，把环境变量 `DGSTUDIO_OCR_PYTHON` 指向一个可用的 `python.exe`。
 
 ## 许可
 

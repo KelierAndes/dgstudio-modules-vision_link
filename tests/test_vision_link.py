@@ -385,7 +385,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             os.path.join(bridge.template_dir, "digits"))
         bridge._dot = detect.ensure_dot_template(
             os.path.join(bridge.template_dir, "digits"))
-        bridge._ocr_checked = True
+        bridge._ocr_preparing = True
         bridge._ocr = None
         frame = np.zeros((80, 260, 3), np.uint8)
         cv2.putText(frame, "42", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 2.0,
@@ -408,7 +408,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             frame[15:15 + th, 20:20 + tw, c] = tpl
         value = bridge._measure(det, frame)
         self.assertEqual(value, 1280)
-        self.assertTrue(bridge._ocr_checked)
+        self.assertTrue(bridge._ocr_preparing or bridge._ocr is not None)
         self.assertIsNotNone(bridge._ocr)
 
     async def test_mapping_dispatch(self):
@@ -561,6 +561,18 @@ class PluginTests(unittest.TestCase):
         module.on_load(ctx)
         self.assertEqual(module.link_params(),
                          [("hp_icon", "检测图片"), ("hp_bar", "检测数值条")])
+
+    def test_detector_vars_register_as_readable(self):
+        ctx = FakeCtx()
+        ctx.settings["detectors"] = [{"name": "hp_icon", "kind": "image"}]
+        ctx.settings["temps"] = [{"name": "leftover"}]
+        module = VisionLinkModule()
+        module.on_load(ctx)
+        specs = {spec["key"]: spec for spec in module.temp_specs()}
+        self.assertEqual(specs["hp_icon"]["dir"], "in")
+        self.assertEqual(specs["hp_icon"]["label"], "检测图片")
+        self.assertNotIn("leftover", specs)
+        self.assertNotIn("temps", ctx.settings)
 
     def test_template_dir_follows_settings(self):
         ctx = FakeCtx()

@@ -2,10 +2,11 @@
 META = {
     "id": "vision_link",
     "name": "画面识别联动",
-    "version": "0.3.2",
+    "version": "0.3.4",
     "description": "OpenCV 通用画面识别：以「参数名 ← 检测行为」自定义实时参数"
                    "（检测颜色 / 图片 / 数值 / 数值条，区域例图可截图选取，"
-                   "数字/文字 RapidOCR 识别），经核心参数映射表驱动设备。",
+                   "数字/文字 RapidOCR 识别，OCR 跑在应用自带 Python 的子进程里），"
+                   "经核心参数映射表驱动设备。",
     "settings_key": "vision_link",
     "actions": [],
     "realtime_manager": True,
@@ -92,9 +93,16 @@ class VisionLinkModule(ModuleBase):
                                                   str(raw.get("kind") or ""))))
         return out
 
+    def temp_specs(self) -> list[dict]:
+        """检测参数由本模块维护：向核心变量表登记为「可读」，回传方向没有意义。"""
+        return [{"key": name, "label": label, "dir": "in",
+                 "desc": "画面识别检测值 · 模块每拍维护"}
+                for name, label in self.link_params()]
+
     def on_load(self, ctx) -> None:
         self.ctx = ctx
         migrate_legacy(ctx.settings, ctx.log)
+        ctx.settings.pop("temps", None)   # 临时变量已并入核心的共享变量表
 
     def on_unload(self) -> None:
         if self.bridge is not None:

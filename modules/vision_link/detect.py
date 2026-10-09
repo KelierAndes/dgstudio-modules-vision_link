@@ -24,6 +24,7 @@ _OCR_TRIED = False
 
 
 def get_ocr():
+    """本进程内的 RapidOCR 单例；打包版由 ocr_env 走子进程，不可用时回退模板法。"""
     global _OCR, _OCR_TRIED
     if not _OCR_TRIED:
         _OCR_TRIED = True
@@ -119,6 +120,8 @@ def ocr_lines(frame, rect, ocr=None):
             result, _elapse = engine(img)
         except Exception:
             return None
+        if result is None:
+            return None       # 引擎本身故障：交给模板法
         rows = _collect_ocr(result)
         if rows:
             return _dedup_lines(rows)
