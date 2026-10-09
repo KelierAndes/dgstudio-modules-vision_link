@@ -2,11 +2,12 @@
 META = {
     "id": "vision_link",
     "name": "画面识别联动",
-    "version": "0.3.5",
-    "description": "OpenCV 通用画面识别：以「参数名 ← 检测行为」自定义实时参数"
+    "version": "0.4.0",
+    "description": "OpenCV 通用画面识别：以「参数名 ← 检测行为」登记实时只读变量"
                    "（检测颜色 / 图片 / 数值 / 数值条，区域例图可截图选取，"
-                   "数字/文字 RapidOCR 识别，OCR 跑在应用自带 Python 的子进程里），"
-                   "经核心参数映射表驱动设备。",
+                   "数字/文字 RapidOCR 识别，OCR 跑在应用自带 Python 的子进程里）；"
+                   "本模块只发布变量，设备动作请在「事件流」页用写入卡片按这些"
+                   "变量编排。",
     "settings_key": "vision_link",
     "actions": [],
     "realtime_manager": True,
@@ -28,12 +29,6 @@ META = {
             "desc": "把最近一帧与检测框写入 config/vision_link/debug/"
                     "（排查识别问题时用）",
         },
-        "mappings": {
-            "label": "输入映射表", "type": "list", "default": [],
-            "group": "map", "rows": "in",
-            "desc": "行 {param: 核心输入参数, expr: 表达式}，变量 {检测参数名} 与 "
-                    "{核心输出参数} 四则运算，结果取整钳制后派发设备动作",
-        },
     },
 }
 
@@ -49,6 +44,8 @@ _CONFIG_DEFAULTS = spec_defaults(META["config"])
 
 _VALUE_TYPES = {"color": "Bool", "image": "Bool", "bar": "Float"}
 
+_LEGACY_TABLE_KEYS = ("mappings", "outputs")
+
 
 def detector_value_type(kind: str, fmt: str = "") -> str:
     """检测行为决定的输出类型：颜色 / 图片 / 文字判定为布尔，数值条为浮点。"""
@@ -57,6 +54,21 @@ def detector_value_type(kind: str, fmt: str = "") -> str:
             return "Float"
         return "Bool" if fmt == "text" else "Int"
     return _VALUE_TYPES.get(kind, "Float")
+
+
+def drop_legacy_tables(settings, log=None) -> bool:
+    """清掉映射表时代留在设置里的行：设备动作已迁到「事件流」的写入卡片。"""
+    removed = [key for key in _LEGACY_TABLE_KEYS if key in settings]
+    if not removed:
+        return False
+    for key in removed:
+        settings.pop(key, None)
+    if hasattr(settings, "save"):
+        settings.save()
+    if log is not None:
+        log("已清除旧版映射表设置（" + "、".join(removed) + "）："
+            "本模块只登记画面识别变量，设备动作请在「事件流」页用写入卡片按这些变量编排")
+    return True
 
 
 class VisionLinkModule(ModuleBase):
@@ -122,6 +134,7 @@ class VisionLinkModule(ModuleBase):
     def on_load(self, ctx) -> None:
         self.ctx = ctx
         migrate_legacy(ctx.settings, ctx.log)
+        drop_legacy_tables(ctx.settings, ctx.log)
         ctx.settings.pop("temps", None)   # 临时变量已并入核心的共享变量表
 
     def on_unload(self) -> None:

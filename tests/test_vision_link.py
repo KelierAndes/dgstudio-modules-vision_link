@@ -11,6 +11,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -19,13 +20,33 @@ from dglab.state import EngineState, Slot
 from modules.vision_link import detect
 from modules.vision_link.bridge import (Detector, VisionBridge,
                                         normalize_detector)
-from modules.vision_link.plugin import VisionLinkModule, migrate_legacy
+from modules.vision_link.plugin import (VisionLinkModule, drop_legacy_tables,
+                                        migrate_legacy)
+
+
+class DeviceWrite(Exception):
+    """桩上下文抛出它：模块一旦直写设备，测试立刻失败。"""
+
+
+def _deny(name: str):
+
+    def deny(self, *args, **kwargs):
+        raise DeviceWrite(f"模块不得直写设备：{name}()")
+    return deny
+
+
+BLOCKED_DEVICE_METHODS = ("set_strength", "add_strength", "reset_strength",
+                          "set_wave", "push_pulse_stream", "fire",
+                          "fire_start", "fire_stop", "zap",
+                          "set_intensity_param")
 
 
 class FakeCtx:
+    """ModuleContext 桩：放行读状态 / 登记变量，拦截全部设备直写。"""
+
     def __init__(self, settings_path: str | None = None):
-        self.calls: list[tuple] = []
         self.logs: list[str] = []
+        self.emergency_calls = 0
         self.state = EngineState(
             connected=True, paired=True,
             slots={"s1": Slot(slot_id="s1", name="Coyote 03", type="COYOTE",
@@ -49,24 +70,19 @@ class FakeCtx:
     def wave_selection(self) -> dict:
         return {"A": "呼吸", "B": ""}
 
-    async def set_strength(self, channel, value, slot_id=None):
-        self.state.slots["s1"].strength[channel] = value
-        self.calls.append(("strength", channel, value))
+    def emergency_stop(self):
+        self.emergency_calls += 1
 
-    async def zap(self, channel, seconds=1.0, slot_id=None):
-        self.calls.append(("zap", channel, round(seconds, 3)))
-
-    async def set_wave(self, channel, name, slot_id=None):
-        self.calls.append(("wave", channel, name))
-
-    async def fire_start(self, slot_id=None, channel=None):
-        self.calls.append(("fire", "start", channel))
-
-    async def fire_stop(self, slot_id=None, channel=None):
-        self.calls.append(("fire", "stop", channel))
-
-    async def emergency_stop(self):
-        self.calls.append(("emergency",))
+    set_strength = _deny("set_strength")
+    add_strength = _deny("add_strength")
+    reset_strength = _deny("reset_strength")
+    set_wave = _deny("set_wave")
+    push_pulse_stream = _deny("push_pulse_stream")
+    fire = _deny("fire")
+    fire_start = _deny("fire_start")
+    fire_stop = _deny("fire_stop")
+    zap = _deny("zap")
+    set_intensity_param = _deny("set_intensity_param")
 
 
 class NormalizeTests(unittest.TestCase):
@@ -411,14 +427,28 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(bridge._ocr_preparing or bridge._ocr is not None)
         self.assertIsNotNone(bridge._ocr)
 
-    async def test_mapping_dispatch(self):
-        bridge = self.make_bridge({
-            "mappings": [{"param": "in_strength_a",
-                          "expr": "{hp}/{100}*200"}]})
+    async def test_detector_values_publish_to_signals(self):
+        bridge = self.make_bridge()
         bridge.apply_config()
-        bridge.engine.signal("hp", 50)
-        await asyncio.sleep(0.02)
-        self.assertIn(("strength", "A", 100), self.ctx.calls)
+        bridge._apply({"hp": (True, 62.5), "reload": (False, 0.0)})
+        self.assertEqual(bridge.engine.signals["hp"], 62.5)
+        self.assertEqual(bridge.engine.signals["reload"], 0.0)
+        bridge.close()
+
+    def test_engine_is_signal_board_only(self):
+        from modules.vision_link.bridge import SignalBoard
+
+        bridge = self.make_bridge()
+        self.assertIsInstance(bridge.engine, SignalBoard)
+        self.assertIsInstance(bridge.engine.signals, dict)
+        self.assertIsInstance(bridge.engine.errors, dict)
+        bridge.engine.signal("hp", "12")
+        self.assertEqual(bridge.engine.signals["hp"], 12.0)
+        bridge.engine.signal("hp", "nope")
+        self.assertEqual(bridge.engine.signals["hp"], 12.0)
+        bridge.engine.pump()
+        bridge.engine.reset()
+        self.assertEqual(bridge.engine.signals, {})
         bridge.close()
 
     def test_hold_semantics(self):
@@ -446,11 +476,58 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(module.is_running())
         self.assertIsNone(module.bridge)
 
-    def test_device_vars_exposed_to_engine(self):
+    def test_signals_are_the_only_public_surface(self):
         bridge = self.make_bridge()
-        vals = bridge.device_vars()
-        self.assertEqual(vals["COYOTE.Battery"], 77)
+        self.assertEqual(bridge.engine.signals, {})
+        self.assertFalse(hasattr(bridge.engine, "mappings"))
+        self.assertFalse(hasattr(bridge.engine, "outputs"))
+        self.assertFalse(hasattr(bridge, "actions"))
+        self.assertFalse(hasattr(bridge, "_dispatch"))
+        self.assertFalse(hasattr(bridge, "device_vars"))
         bridge.close()
+
+
+class NoDeviceWriteGuardTests(unittest.IsolatedAsyncioTestCase):
+    """架构契约：模块只登记变量。桩上下文对任何设备直写都抛错，跑一整轮采集不许触发。"""
+
+    async def test_full_capture_cycle_never_writes_devices(self):
+        frame = np.zeros((120, 120, 3), np.uint8)
+        frame[10:60, 10:60] = (0, 0, 255)
+        ctx = FakeCtx()
+        bridge = VisionBridge(ctx, {
+            "interval": 0.05,
+            "detectors": [
+                {"name": "red", "kind": "color", "rect": [0, 0, 100, 100],
+                 "color": "#FF0000", "tol": 40, "ratio": 0.05},
+                {"name": "ammo", "kind": "number", "rect": [0, 0, 90, 30],
+                 "fmt": "int"},
+            ]})
+        with mock.patch.object(detect, "grab_frame",
+                               new=lambda *a, **k: frame.copy()):
+            await bridge.start()
+            try:
+                seen: dict[str, float] = {}
+                for _ in range(80):
+                    await asyncio.sleep(0.05)
+                    seen = dict(bridge.engine.signals)
+                    if {"red", "ammo"} <= set(seen):
+                        break
+            finally:
+                await bridge.stop()
+        self.assertEqual(seen.get("red"), 1.0, seen)
+        self.assertIn("ammo", seen)
+        self.assertEqual(bridge.engine.errors, {})
+        self.assertEqual(ctx.emergency_calls, 0)
+        self.assertNotIn("mappings", bridge.config)
+        self.assertNotIn("outputs", bridge.config)
+
+    def test_stub_ctx_blocks_every_forbidden_method(self):
+        ctx = FakeCtx()
+        for name in BLOCKED_DEVICE_METHODS:
+            with self.assertRaises(DeviceWrite):
+                getattr(ctx, name)("A")
+        ctx.emergency_stop()          # 急停是安全通道，仍然放行
+        self.assertEqual(ctx.emergency_calls, 1)
 
 
 class MigrationTests(unittest.TestCase):
@@ -503,7 +580,11 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(meta["id"], "vision_link")
         self.assertEqual(meta["settings_key"], "vision_link")
         self.assertTrue(meta["realtime_manager"])
-        self.assertIn("mappings", meta["config"])
+        self.assertEqual(meta["version"], "0.4.0")
+        self.assertNotIn("mappings", meta["config"])
+        self.assertNotIn("outputs", meta["config"])
+        self.assertIn("事件流", meta["description"])
+        self.assertNotIn("映射表", meta["description"])
         self.assertIn("interval", meta["config"])
         self.assertIn("hold", meta["config"])
         self.assertIn("debug_dump", meta["config"])
@@ -573,6 +654,37 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(specs["hp_icon"]["label"], "检测图片")
         self.assertNotIn("leftover", specs)
         self.assertNotIn("temps", ctx.settings)
+
+    def test_on_load_drops_legacy_mapping_tables(self):
+        ctx = FakeCtx()
+        ctx.settings["mappings"] = [{"param": "in_strength_a", "expr": "{hp}"}]
+        ctx.settings["outputs"] = [{"name": "hp_out", "expr": "{hp}"}]
+        ctx.settings["interval"] = 0.7
+        saved: list[bool] = []
+        ctx.settings.save = lambda: saved.append(True)
+        module = VisionLinkModule()
+        module.on_load(ctx)
+        self.assertNotIn("mappings", ctx.settings)
+        self.assertNotIn("outputs", ctx.settings)
+        self.assertEqual(ctx.settings["interval"], 0.7)
+        self.assertGreaterEqual(len(saved), 1)
+        self.assertEqual(len(ctx.logs), 1)
+        self.assertIn("事件流", ctx.logs[0])
+        self.assertIn("写入卡片", ctx.logs[0])
+
+    def test_on_load_stays_quiet_without_legacy_tables(self):
+        ctx = FakeCtx()
+        VisionLinkModule().on_load(ctx)
+        self.assertEqual(ctx.logs, [])
+
+    def test_drop_legacy_tables_helper_is_idempotent(self):
+        settings = {"mappings": [{"param": "in_fire", "expr": "{x}"}]}
+        logs: list[str] = []
+        self.assertTrue(drop_legacy_tables(settings, logs.append))
+        self.assertFalse(drop_legacy_tables(settings, logs.append))
+        self.assertEqual(len(logs), 1)
+        self.assertFalse(drop_legacy_tables({}, logs.append))
+        self.assertEqual(len(logs), 1)
 
     def test_template_dir_follows_settings(self):
         ctx = FakeCtx()

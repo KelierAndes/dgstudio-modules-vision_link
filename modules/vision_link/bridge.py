@@ -7,10 +7,6 @@ import time
 
 import cv2
 
-from dglab.mapping import MappingEngine, signal_specs
-from dglab.params import (build_dispatchers, core_alias_values, core_inputs,
-                          device_state_values)
-
 from modules.vision_link import detect, ocr_env
 
 DEFAULTS = {
@@ -18,13 +14,49 @@ DEFAULTS = {
     "hold": 1.0,
     "debug_dump": False,
     "detectors": [],
-    "mappings": [],
-    "outputs": [],
 }
 
 _KINDS = ("color", "image", "number", "bar")
 KIND_LABELS = {"color": "检测颜色", "image": "检测图片",
                "number": "检测数值", "bar": "检测数值条"}
+
+
+def _as_number(value) -> float | None:
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+class SignalBoard:
+    """模块只登记变量：检测值落在 signals，设备动作由事件流的写入卡片驱动。
+
+    核心按 ``inst.bridge.engine`` 取 ``signals`` / ``errors`` 渲染变量表与实时值，
+    并会对引擎调用 ``pump()``——本模块没有表达式表，pump 是空实现，签名保留。
+    """
+
+    def __init__(self) -> None:
+        self.signals: dict[str, float] = {}
+        self.errors: dict[str, str] = {}
+
+    def signal(self, name: str, value) -> None:
+        num = _as_number(value)
+        if num is None or self.signals.get(name) == num:
+            return
+        self.signals[name] = num
+
+    def pump(self) -> None:
+        return None
+
+    def reset(self) -> None:
+        self.signals.clear()
+        self.errors.clear()
 
 
 def _clamp(value, low, high, default):
@@ -109,58 +141,13 @@ class Detector:
         self.value = 0.0
 
 
-class _DeviceApi:
-
-    def __init__(self, bridge: "VisionBridge"):
-        self._bridge = bridge
-
-    @property
-    def _ctx(self):
-        return self._bridge.ctx
-
-    def resolve_slot(self, family: str = "") -> str | None:
-        return self._ctx.resolve_slot(
-            family=str(family or "COYOTE").upper(), output_only=True)
-
-    def wave_order(self, family: str = "") -> list[str]:
-        return self._ctx.wave_order(str(family or "COYOTE").upper())
-
-    def wave_selection(self) -> dict:
-        return self._ctx.wave_selection() or {}
-
-    def set_strength(self, channel, value, slot_id=None):
-        return self._ctx.set_strength(channel, value, slot_id=slot_id)
-
-    def set_wave(self, channel, name, slot_id=None):
-        return self._ctx.set_wave(channel, name, slot_id=slot_id)
-
-    def zap(self, channel, seconds=1.0, slot_id=None):
-        return self._ctx.zap(channel, seconds, slot_id=slot_id)
-
-    def fire_start(self, slot_id=None, channel=None):
-        return self._ctx.fire_start(slot_id=slot_id, channel=channel)
-
-    def fire_stop(self, slot_id=None, channel=None):
-        return self._ctx.fire_stop(slot_id=slot_id, channel=channel)
-
-    def emergency_stop(self):
-        return self._ctx.emergency_stop()
-
-    def run(self, coro) -> None:
-        self._bridge._spawn(coro)
-
-
 class VisionBridge:
     def __init__(self, ctx, config: dict | None = None):
         self.ctx = ctx
         self.config = dict(DEFAULTS)
         self.config.update({k: v for k, v in (config or {}).items()
                             if k in self.config})
-        self.engine = MappingEngine(self._dispatch,
-                                    device_vars=self.device_vars)
-        self.engine.set_ranges(signal_specs())
-        self._api = _DeviceApi(self)
-        self.actions = build_dispatchers(self._api, core_inputs())
+        self.engine = SignalBoard()
         self.detectors: list[Detector] = []
         self._templates: dict[str, "cv2.Mat"] = {}
         self._anchors: dict[str, "cv2.Mat"] = {}
@@ -171,8 +158,6 @@ class VisionBridge:
         self._ocr_preparing = False
         self._running = False
         self._task: asyncio.Task | None = None
-        self._tasks: set[asyncio.Task] = set()
-        self._primed = False
         self._last_err = 0.0
         self._last_dump = 0.0
 
@@ -193,14 +178,6 @@ class VisionBridge:
 
 
     def apply_config(self) -> None:
-        first = not self._primed
-        if first:
-            self.engine.armed = False
-        self.engine.set_mappings(self.config.get("mappings") or [])
-        self.engine.set_outputs(self.config.get("outputs") or [])
-        if first:
-            self.engine.armed = True
-            self._primed = True
         self.rebuild()
 
     def rebuild(self) -> None:
@@ -289,15 +266,6 @@ class VisionBridge:
     def is_running(self) -> bool:
         return self._running
 
-    def _spawn(self, coro) -> None:
-        try:
-            task = asyncio.ensure_future(coro)
-        except RuntimeError:
-            coro.close()
-            return
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-
 
     async def _loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -323,7 +291,6 @@ class VisionBridge:
                         self._err(f"画面检测失败: {exc!r}")
                         continue
                 self._apply(results)
-                self.engine.pump()
         except asyncio.CancelledError:
             pass
 
@@ -437,21 +404,3 @@ class VisionBridge:
             return
         self._last_err = now
         self.ctx.log(msg)
-
-    def _dispatch(self, target: str, value: int) -> None:
-        action = self.actions.get(target)
-        if action is None:
-            return
-        try:
-            action(value)
-        except Exception as exc:
-            self.ctx.log(f"画面识别派发 {target}={value} 失败: {exc!r}")
-
-    def device_vars(self) -> dict:
-        try:
-            state = self.ctx.get_state()
-        except Exception:
-            return {}
-        vals = device_state_values(state)
-        vals.update(core_alias_values(vals))
-        return vals
