@@ -18,7 +18,15 @@
 卸载 / 更新即热重载生效。也可手动把本仓库 `modules/<模块 id>/` 文件夹整个
 放入应用目录的 `modules/` 下。
 
-依赖：`opencv-python-headless>=4.10`（必装，随本仓库 `modules/vision_link/wheels/` 离线分发）。数字 / 文字识别用的 RapidOCR **不装进模块进程**：`onnxruntime` 在打包版（PyInstaller 冻结）进程里 import 即段错误，因此首次用到 OCR 时，应用会用它自带的 `_python` 解释器自行安装 `rapidocr-onnxruntime`（优先用 `wheels/` 里的随包 wheel，不适配则联网安装），识别在子进程里完成，本模块只收发图片与结果。
+自带 wheel 分两个目录，**必须与 DGStudio 内置 Python 的 ABI 一致**（当前是
+`cp314`；纯 Python 与 `abi3` 的 wheel 不受此限）：
+
+| 目录 | 内容 | 谁来装 |
+|---|---|---|
+| `modules/vision_link/wheels/` | 模块进程自己的依赖：`numpy`、`opencv-python-headless` | 宿主安装模块时解进 `modules/vision_link/_deps/`，进模块进程 |
+| `modules/vision_link/ocr_wheels/` | 识别栈：`rapidocr-onnxruntime`、`onnxruntime`、`pyclipper`、`shapely`、`pyyaml`、`pillow`、`six`、`tqdm` | 只给应用自带的 `_python` 解释器用，宿主不会解进 `_deps` |
+
+依赖：`opencv-python-headless>=4.10`（必装，随本仓库 `modules/vision_link/wheels/` 离线分发）。数字 / 文字识别用的 RapidOCR **不装进模块进程**：`onnxruntime` 在打包版（PyInstaller 冻结）进程里 import 即段错误，因此首次用到 OCR 时，应用会用它自带的 `_python` 解释器按 `ocr_wheels/` + `wheels/` 离线装好整套识别依赖（`rapidocr-onnxruntime` 的元数据只声明到 Python 3.12，安装时带 `--ignore-requires-python`；随包 wheel 不适配时改联网安装），识别在子进程里完成，本模块只收发图片与结果。
 
 相关仓库：DGStudio 核心 [DG-Lab-Studio](https://github.com/KelierAndes/DG-Lab-Studio)；模块市场 [dgstudio-modules-market](https://github.com/KelierAndes/dgstudio-modules-market)。
 
@@ -37,7 +45,7 @@
 
 区域与例图都支持两种途径：点「截区域 / 截例图」在当前画面上**截图框选**（与采集同一管线，坐标天然一致；例图自动存入 `config/vision_link/templates/`），或手动输入坐标/文件名（坐标即截图图像像素，可用「标定调试」输出的帧核对）。检测配置随各参数条目即时生效，无需重启模块；数值 / 数值条读不出时按「失败保持」沿用上次值，超时归零。
 
-数字 / 文字识别依赖 RapidOCR（`rapidocr-onnxruntime`），由应用内置 Python 在首次用到时自动准备，无需手动安装；OCR 环境不可用（例如离线且随包 wheel 不适配）时，数字 / 文字检测自动回退内置字形 / 字体模板匹配，其余检测类型不受影响。开发环境（源码运行 DGStudio）若想用进程内 OCR，直接 `pip install rapidocr-onnxruntime` 即可；想让源码运行也走子进程链路，把环境变量 `DGSTUDIO_OCR_PYTHON` 指向一个可用的 `python.exe`。
+数字 / 文字识别依赖 RapidOCR（`rapidocr-onnxruntime`），由应用内置 Python 在首次用到时自动准备，无需手动安装；OCR 环境不可用（例如既离线又缺随包 wheel）时，数字 / 文字检测自动回退内置字形 / 字体模板匹配，其余检测类型不受影响。开发环境（源码运行 DGStudio）默认不走 OCR 子进程：想用进程内识别，装一次 `pip install --ignore-requires-python rapidocr-onnxruntime`（该包元数据只声明到 Python 3.12，3.13+ 需要这个参数；在 3.12 及更早的解释器里直接装即可）；想让源码运行也走同一条子进程链路，把环境变量 `DGSTUDIO_OCR_PYTHON` 指向一个可用的 `python.exe`。
 
 ## 许可
 

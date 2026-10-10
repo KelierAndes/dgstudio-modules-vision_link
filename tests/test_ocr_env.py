@@ -115,8 +115,68 @@ class RunnerTests(EnvStateMixin):
         self.assertIsNone(ocr_env.client())
 
 
-class PrepareTests(EnvStateMixin):
+class InstallCommandTests(EnvStateMixin):
+    """离线优先的识别依赖安装命令：随包 wheel 要能盖住整套 OCR 栈。"""
 
+    def test_offline_install_names_whole_stack_and_both_dirs(self):
+        seen: list[list[str]] = []
+
+        def fake_run(args, timeout):
+            seen.append(list(args))
+            return True, "Successfully installed"
+
+        self.patch(_run=fake_run,
+                   _wheel_dirs=lambda: ["/tmp/ocr_wheels", "/tmp/wheels"])
+        ok, _out = ocr_env._install("py.exe", None)
+        self.assertTrue(ok)
+        cmd = seen[0]
+        for flag in ("--no-index", "--no-deps", "--ignore-requires-python"):
+            self.assertIn(flag, cmd)
+        self.assertEqual(cmd.count("--find-links"), 2)
+        for pkg in ("rapidocr-onnxruntime", "onnxruntime", "pillow", "numpy",
+                    "opencv-python-headless"):
+            self.assertIn(pkg, cmd)
+
+    def test_offline_failure_falls_back_to_network(self):
+        seen: list[list[str]] = []
+
+        def fake_run(args, timeout):
+            seen.append(list(args))
+            return (False, "no matching distribution") if len(seen) == 1 \
+                else (True, "Successfully installed")
+
+        self.patch(_run=fake_run, _wheel_dirs=lambda: ["/tmp/wheels"])
+        logs: list[str] = []
+        ok, _out = ocr_env._install("py.exe", logs.append)
+        self.assertTrue(ok)
+        self.assertEqual(len(seen), 2)
+        self.assertNotIn("--no-index", seen[1])
+        self.assertTrue(any("改从网络安装" in line for line in logs))
+
+    def test_without_bundled_wheels_goes_straight_to_network(self):
+        seen: list[list[str]] = []
+
+        def fake_run(args, timeout):
+            seen.append(list(args))
+            return True, "ok"
+
+        self.patch(_run=fake_run, _wheel_dirs=lambda: [])
+        self.assertTrue(ocr_env._install("py.exe", None)[0])
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("--no-index", seen[0])
+
+    def test_repo_ships_an_ocr_wheels_dir(self):
+        """识别栈必须单独随包：混进 wheels/ 会被宿主解进模块进程的 _deps，
+        而 onnxruntime 在冻结的主进程里 import 就段错误。"""
+        names = [os.path.basename(path) for path in ocr_env._wheel_dirs()]
+        self.assertIn("ocr_wheels", names)
+        module_wheels = os.path.join(os.path.dirname(ocr_env.WORKER), "wheels")
+        if os.path.isdir(module_wheels):
+            self.assertFalse([p for p in os.listdir(module_wheels)
+                              if "onnxruntime" in p or "rapidocr" in p])
+
+
+class PrepareTests(EnvStateMixin):
     def _fake(self, checks, install_ok=True):
         calls = {"install": 0}
         pending = list(checks)

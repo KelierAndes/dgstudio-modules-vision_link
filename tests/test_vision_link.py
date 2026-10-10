@@ -580,7 +580,7 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(meta["id"], "vision_link")
         self.assertEqual(meta["settings_key"], "vision_link")
         self.assertTrue(meta["realtime_manager"])
-        self.assertEqual(meta["version"], "0.4.0")
+        self.assertEqual(meta["version"], "0.4.1")
         self.assertNotIn("mappings", meta["config"])
         self.assertNotIn("outputs", meta["config"])
         self.assertIn("事件流", meta["description"])

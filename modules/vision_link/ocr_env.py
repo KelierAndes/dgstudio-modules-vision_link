@@ -1,8 +1,9 @@
 """OCR 运行环境：用应用自带的 _python 解释器在子进程里跑 RapidOCR。
 
-主进程（PyInstaller 冻结版）里 import onnxruntime 会段错误，可选 OCR 依赖也没有
-适配内置 Python 的 wheel，所以识别依赖装进 _python 自己的 site-packages，识别
-请求交给 ocr_worker.py 子进程，主进程只收发 JSON。
+主进程（PyInstaller 冻结版）里 import onnxruntime 会段错误，所以识别依赖绝不装进
+模块进程：随包的模块依赖放在 wheels/（宿主会解到 _deps、进模块进程），OCR 那一套
+单独放 ocr_wheels/（宿主不碰），首次用到 OCR 时由应用自带的 _python 解释器安装，
+识别请求交给 ocr_worker.py 子进程，主进程只收发 JSON。
 """
 
 from __future__ import annotations
@@ -15,7 +16,15 @@ import subprocess
 import sys
 import threading
 
-REQUIREMENTS = ("rapidocr-onnxruntime",)
+# 离线装时逐个点名：rapidocr 的依赖里写的是 opencv-python，随包给的是 headless
+# 版；让 pip 自己解依赖就会联网去拉全量 opencv，--no-deps 点名才走随包 wheel。
+OFFLINE_PACKAGES = ("rapidocr-onnxruntime", "onnxruntime", "pyclipper",
+                    "shapely", "pyyaml", "pillow", "six", "tqdm", "numpy",
+                    "opencv-python-headless")
+# rapidocr-onnxruntime 的元数据写着 Requires-Python <3.13，但它是纯 Python 包，
+# 实测在应用内置的 3.14 解释器里跑得通；不加这个参数 pip 会直接拒装。
+PIP_FLAGS = ("--disable-pip-version-check", "--no-input",
+             "--ignore-requires-python")
 WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                       "ocr_worker.py")
 CHECK_TIMEOUT_S = 90.0
@@ -37,8 +46,6 @@ def runner_python() -> str:
     else:
         path = str(os.environ.get("DGSTUDIO_OCR_PYTHON") or "")
     return path if path and os.path.isfile(path) else ""
-
-
 def status() -> tuple[str, str]:
     with _guard:
         return _state, _note
@@ -63,7 +70,9 @@ def prepare_async(log=None) -> str:
             return _state
         python = runner_python()
         if not python:
-            _apply("idle", "未找到内置 Python 运行时（exe 旁 _python/）", None)
+            _apply("idle", "未找到 OCR 用的 Python 运行时"
+                   "（打包版看 exe 旁 _python/，开发版设 DGSTUDIO_OCR_PYTHON）",
+                   None)
             return _state
         _apply("preparing", "", None)
     threading.Thread(target=_prepare, args=(python, log), daemon=True).start()
@@ -130,18 +139,27 @@ def _check(python: str) -> tuple[bool, str]:
     return _run([python, "-X", "utf8", WORKER, "--check"], CHECK_TIMEOUT_S)
 
 
+def _wheel_dirs() -> list[str]:
+    """随包 wheel 目录：ocr_wheels/ 给识别栈，wheels/ 补 numpy 与 headless opencv。"""
+    base = os.path.dirname(WORKER)
+    return [os.path.join(base, name) for name in ("ocr_wheels", "wheels")
+            if os.path.isdir(os.path.join(base, name))]
+
+
 def _install(python: str, log) -> tuple[bool, str]:
-    base = [python, "-X", "utf8", "-m", "pip", "install",
-            "--disable-pip-version-check", "--no-input"]
-    wheels = os.path.join(os.path.dirname(WORKER), "wheels")
-    ok, out = True, ""
-    if os.path.isdir(wheels):
-        ok, out = _run([*base, "--no-index", "--find-links", wheels,
-                        *REQUIREMENTS], INSTALL_TIMEOUT_S)
+    base = [python, "-X", "utf8", "-m", "pip", "install", *PIP_FLAGS]
+    dirs = _wheel_dirs()
+    ok, out = False, ""
+    if dirs:
+        offline = [*base, "--no-index", "--no-deps"]
+        for path in dirs:
+            offline += ["--find-links", path]
+        ok, out = _run([*offline, *OFFLINE_PACKAGES], INSTALL_TIMEOUT_S)
         if not ok:
-            _log(log, "OCR：随包 wheel 不适配内置 Python，改从网络安装")
-    if not ok or not os.path.isdir(wheels):
-        ok, out = _run([*base, *REQUIREMENTS], INSTALL_TIMEOUT_S)
+            _log(log, "OCR：随包 wheel 装不进内置 Python，改从网络安装")
+    if not ok:
+        ok, out = _run([*base, "--no-deps", *OFFLINE_PACKAGES],
+                       INSTALL_TIMEOUT_S)
     for line in out.strip().splitlines()[-3:]:
         _log(log, f"[ocr deps] {line}")
     return ok, out

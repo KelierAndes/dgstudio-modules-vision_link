@@ -2,7 +2,7 @@
 META = {
     "id": "vision_link",
     "name": "画面识别联动",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "description": "OpenCV 通用画面识别：以「参数名 ← 检测行为」登记实时只读变量"
                    "（检测颜色 / 图片 / 数值 / 数值条，区域例图可截图选取，"
                    "数字/文字 RapidOCR 识别，OCR 跑在应用自带 Python 的子进程里）；"
