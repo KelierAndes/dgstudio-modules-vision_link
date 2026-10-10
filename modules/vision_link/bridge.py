@@ -329,10 +329,12 @@ class VisionBridge:
         self._ocr_preparing = True
         if not ocr_env.runner_python():
             self._err("RapidOCR 不可用，数字/文字检测回退模板匹配"
-                      "（pip install rapidocr-onnxruntime 启用 OCR）")
+                      "（打包版需要 exe 旁的 _python/，开发版可设 "
+                      "DGSTUDIO_OCR_PYTHON）")
             return
-        ocr_env.prepare_async(self._err)
-
+        # 识别环境的消息是一次性的状态变化，别走上面每拍采集错误的 10 秒限流：
+        # 「正在下载依赖」刚过 2 秒就轮到的「就绪」会被吞掉，看着像卡在装依赖。
+        ocr_env.prepare_async(self.ctx.log)
     def _measure(self, det: Detector, frame):
         spec = det.spec
         if det.kind == "color":

@@ -11,6 +11,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -305,6 +306,8 @@ class StubBridge:
         self._ocr = None
         self._ocr_preparing = False
         self.errors: list[str] = []
+        self.logs: list[str] = []
+        self.ctx = SimpleNamespace(log=self.logs.append)
 
     def _err(self, msg: str) -> None:
         self.errors.append(msg)
@@ -349,6 +352,23 @@ class BridgeOcrTests(EnvStateMixin):
         bridge._ensure_ocr()
         self.assertIsNone(bridge._ocr)
         self.assertTrue(any("回退模板匹配" in line for line in bridge.errors))
+
+    def test_ocr_env_messages_bypass_the_per_beat_error_throttle(self):
+        """识别环境的状态消息走宿主日志，不走每拍采集错误的限流通道。
+
+        真机上「正在下载依赖」之后 2 秒的「就绪」正是被 10 秒限流吃掉，日志
+        看起来就像卡在装依赖。
+        """
+        passed: list = []
+        detect.get_ocr = lambda: None
+        self.patch(client=lambda: None, runner_python=lambda: "py.exe",
+                   prepare_async=lambda log=None: passed.append(log) or "preparing")
+        bridge = StubBridge()
+        bridge._ensure_ocr()
+        self.assertEqual(len(passed), 1)
+        passed[0]("OCR：内置 Python 识别环境就绪")
+        self.assertIn("OCR：内置 Python 识别环境就绪", bridge.logs)
+        self.assertEqual(bridge.errors, [])
 
 
 if __name__ == "__main__":

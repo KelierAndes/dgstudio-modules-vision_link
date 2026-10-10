@@ -27,6 +27,10 @@ PIP_FLAGS = ("--disable-pip-version-check", "--no-input",
              "--ignore-requires-python")
 WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                       "ocr_worker.py")
+# -E -s：内置 Python 必须只看自己的 site-packages。宿主机的用户级
+# %APPDATA%\Python\314\site-packages 里若恰好有同名包，pip 会说「already
+# satisfied」而跳过随包 wheel，换一台干净机器就装不出来。
+PY_FLAGS = ("-X", "utf8", "-E", "-s")
 CHECK_TIMEOUT_S = 90.0
 INSTALL_TIMEOUT_S = 1800.0
 START_TIMEOUT_S = 180.0
@@ -136,7 +140,7 @@ def _run(args: list[str], timeout: float) -> tuple[bool, str]:
 
 
 def _check(python: str) -> tuple[bool, str]:
-    return _run([python, "-X", "utf8", WORKER, "--check"], CHECK_TIMEOUT_S)
+    return _run([python, *PY_FLAGS, WORKER, "--check"], CHECK_TIMEOUT_S)
 
 
 def _wheel_dirs() -> list[str]:
@@ -147,7 +151,7 @@ def _wheel_dirs() -> list[str]:
 
 
 def _install(python: str, log) -> tuple[bool, str]:
-    base = [python, "-X", "utf8", "-m", "pip", "install", *PIP_FLAGS]
+    base = [python, *PY_FLAGS, "-m", "pip", "install", *PIP_FLAGS]
     dirs = _wheel_dirs()
     ok, out = False, ""
     if dirs:
@@ -179,7 +183,7 @@ class OcrClient:
     def _start(self) -> bool:
         try:
             self._proc = subprocess.Popen(
-                [self._python, "-X", "utf8", WORKER],
+                [self._python, *PY_FLAGS, WORKER],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                 errors="replace", env=_clean_env())
